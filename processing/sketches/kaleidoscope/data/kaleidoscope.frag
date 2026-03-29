@@ -42,9 +42,9 @@ void main() {
     rotation += u_snare * 0.25;
 
     // --- Zoom: breathes with bass, energy widens the range ---
-    float breathDepth = 0.03 + e * 0.08;
-    float zoom = 1.0 + sin(u_time * 0.25) * breathDepth + u_bass * 0.08;
-    zoom += u_kick * 0.1 + u_snare * 0.06;
+    float breathDepth = 0.03 + e * 0.05;
+    float zoom = 1.0 + sin(u_time * 0.25) * breathDepth + u_bass * 0.05;
+    zoom += u_kick * 0.07 + u_snare * 0.04;
     vec2 centered = (uv - 0.5) / zoom;
 
     // --- Displacement warp on loud moments ---
@@ -70,9 +70,9 @@ void main() {
     vec2 finalUV = mix(origUV, kalUV, u_fold);
     finalUV = clamp(finalUV, 0.0, 1.0);
 
-    // --- Mosaic: snare shatters into blocks ---
-    if (u_snare > 0.1) {
-        float mosaicRes = mix(120.0, 18.0, smoothstep(0.1, 0.8, u_snare));
+    // --- Mosaic: subtle pixel snap on snare ---
+    if (u_snare > 0.35) {
+        float mosaicRes = mix(200.0, 60.0, smoothstep(0.35, 0.9, u_snare));
         finalUV = (floor(finalUV * mosaicRes) + 0.5) / mosaicRes;
         finalUV = clamp(finalUV, 0.0, 1.0);
     }

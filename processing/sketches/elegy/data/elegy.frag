@@ -104,9 +104,8 @@ void main() {
     vec3 gradedAfter = mix(bwAfter, warmAfter, max(u_warmth, 0.3));
     gradedAfter = smoothstep(vec3(0.0), vec3(1.0), gradedAfter * 1.05);
 
-    // --- Compose: before dissolves to reveal after ---
-    // visible=1 → before (no clouds), visible=0 → after (clouds)
-    vec3 result = mix(gradedAfter, gradedBefore, visible) + edgeColor;
+    // --- Compose: --reveal (u_after) shows first, dissolves to reveal --image (u_before) ---
+    vec3 result = mix(gradedBefore, gradedAfter, visible) + edgeColor;
 
     // --- Radial blast light (from where the cloud appears) ---
     vec2 blastCenter = vec2(0.5, 0.32);

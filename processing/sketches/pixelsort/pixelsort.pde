@@ -31,6 +31,11 @@ int numImages = 0;
 int[][] imagePixels;  // pixel data for each loaded image
 float crossfadeZone = 0.12; // fraction of each segment used for crossfade
 
+// -- Video frames mode --
+boolean videoMode = false;
+String videoFramesDir = null;
+int videoFrameCount = 0;
+
 // -- Sort modes: 0=luma, 1=hue, 2=red channel --
 int sortMode = 0;
 float sortModeTimer = 0;
@@ -73,29 +78,48 @@ void setup() {
     return;
   }
 
-  // Load images — single path or comma-separated list
-  String[] imagePaths = imageArg.split(",");
-  numImages = imagePaths.length;
   int totalPx = targetWidth * targetHeight;
-  imagePixels = new int[numImages][totalPx];
-
-  for (int i = 0; i < numImages; i++) {
-    PImage img = loadImage(imagePaths[i].trim());
-    if (img == null || img.width <= 0) {
-      println("Error: could not load image: " + imagePaths[i]);
-      exit();
-      return;
-    }
-    img.resize(targetWidth, targetHeight);
-    img.loadPixels();
-    arrayCopy(img.pixels, imagePixels[i]);
-    println("Loaded image " + (i + 1) + "/" + numImages + ": " + imagePaths[i].trim());
-  }
-
   working = new int[totalPx];
   source  = new int[totalPx];
   prev    = new int[totalPx];
-  arrayCopy(imagePixels[0], prev);
+
+  // Check if imageArg is a directory (video frames mode)
+  java.io.File imageFile = new java.io.File(imageArg);
+  if (imageFile.isDirectory()) {
+    videoMode = true;
+    videoFramesDir = imageArg;
+    // Count available frames
+    String[] files = imageFile.list();
+    int count = 0;
+    for (String f : files) {
+      if (f.endsWith(".jpg") && f.startsWith("frame-")) count++;
+    }
+    videoFrameCount = count;
+    println("Video frames mode: " + videoFrameCount + " source frames in " + videoFramesDir);
+
+    // Load first frame to initialize prev[]
+    numImages = 1;
+    loadVideoFrame(0, prev);
+  } else {
+    // Load images — single path or comma-separated list
+    String[] imagePaths = imageArg.split(",");
+    numImages = imagePaths.length;
+    imagePixels = new int[numImages][totalPx];
+
+    for (int i = 0; i < numImages; i++) {
+      PImage img = loadImage(imagePaths[i].trim());
+      if (img == null || img.width <= 0) {
+        println("Error: could not load image: " + imagePaths[i]);
+        exit();
+        return;
+      }
+      img.resize(targetWidth, targetHeight);
+      img.loadPixels();
+      arrayCopy(img.pixels, imagePixels[i]);
+      println("Loaded image " + (i + 1) + "/" + numImages + ": " + imagePaths[i].trim());
+    }
+    arrayCopy(imagePixels[0], prev);
+  }
 
   analysisData = loadJSONObject(analysisPath);
   framesArray = analysisData.getJSONArray("frames");
@@ -144,11 +168,38 @@ float thresholdKey(int c) {
 }
 
 // ================================================================
+//  VIDEO FRAME LOADING
+// ================================================================
+
+/** Load a video frame by index (0-based) into the target pixel buffer */
+void loadVideoFrame(int frameIndex, int[] target) {
+  // Source frames are 1-indexed: frame-000001.jpg
+  int sourceIdx = constrain(frameIndex + 1, 1, videoFrameCount);
+  String framePath = videoFramesDir + "/frame-" + nf(sourceIdx, 6) + ".jpg";
+  PImage img = loadImage(framePath);
+  if (img == null || img.width <= 0) {
+    println("Warning: could not load video frame: " + framePath);
+    return;
+  }
+  if (img.width != targetWidth || img.height != targetHeight) {
+    img.resize(targetWidth, targetHeight);
+  }
+  img.loadPixels();
+  arrayCopy(img.pixels, target);
+}
+
+// ================================================================
 //  IMAGE BLENDING
 // ================================================================
 
 /** Build the source pixel buffer for this frame, crossfading between images */
 void buildSource(float progress) {
+  // Video mode: load the corresponding source frame directly
+  if (videoMode) {
+    loadVideoFrame(currentFrame, source);
+    return;
+  }
+
   if (numImages == 1) {
     arrayCopy(imagePixels[0], source);
     return;
@@ -607,9 +658,10 @@ void displaceRow(int[] pixels, int y, int shift) {
 // ================================================================
 void saveJPEG(PGraphics pg, String filePath, float quality) {
   try {
-    BufferedImage bi = (BufferedImage) pg.getNative();
-    BufferedImage rgb = new BufferedImage(bi.getWidth(), bi.getHeight(), BufferedImage.TYPE_INT_RGB);
-    rgb.getGraphics().drawImage(bi, 0, 0, null);
+    // Build BufferedImage from pixel data (works for both JAVA2D and P2D)
+    pg.loadPixels();
+    BufferedImage rgb = new BufferedImage(pg.width, pg.height, BufferedImage.TYPE_INT_RGB);
+    rgb.setRGB(0, 0, pg.width, pg.height, pg.pixels, 0, pg.width);
 
     javax.imageio.ImageWriter writer = ImageIO.getImageWritersByFormatName("jpeg").next();
     JPEGImageWriteParam param = (JPEGImageWriteParam) writer.getDefaultWriteParam();
