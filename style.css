@@ -1,0 +1,95 @@
+:root {
+  color-scheme: dark;
+  --bg: #090d14;
+  --panel: rgba(9, 13, 20, 0.94);
+  --text: #eef3ff;
+  --muted: rgba(238, 243, 255, 0.72);
+  --line: rgba(238, 243, 255, 0.14);
+  --accent: #66d8ff;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  font-family: "Share Tech Mono", monospace;
+  color: var(--text);
+}
+
+canvas {
+  display: block;
+}
+
+#start-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at center, rgba(102, 216, 255, 0.1), transparent 34%),
+    linear-gradient(180deg, #080d15 0%, #11131b 58%, #130d11 100%);
+}
+
+#start-overlay.hidden {
+  display: none;
+}
+
+.start-content {
+  width: min(34rem, calc(100vw - 2rem));
+  padding: 1.25rem 1.25rem 1.35rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.35);
+  text-align: center;
+}
+
+.start-kicker {
+  margin-bottom: 0.8rem;
+  color: var(--accent);
+  font-size: 0.72rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+.start-label {
+  font-size: clamp(2rem, 6vw, 4.1rem);
+  line-height: 0.9;
+  letter-spacing: 0.18em;
+  margin-bottom: 1rem;
+  color: var(--text);
+}
+
+.start-copy {
+  margin: 0 auto 1.8rem;
+  max-width: 27rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+#start-btn {
+  font-family: "Share Tech Mono", monospace;
+  font-size: 1rem;
+  letter-spacing: 0.2em;
+  padding: 0.8rem 2.4rem;
+  background: transparent;
+  border: 1px solid rgba(102, 216, 255, 0.34);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.3s, color 0.3s, background-color 0.3s;
+}
+
+#start-btn:hover {
+  border-color: rgba(102, 216, 255, 0.82);
+  color: #fff;
+  background: rgba(102, 216, 255, 0.08);
+}

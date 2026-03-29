@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Star Drive</title>
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Orbitron:wght@600;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://threejs.org/build/three.module.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <main class="hud">
+      <div class="panel">
+        <p class="eyebrow">three.js space build</p>
+        <h1>Star Drive</h1>
+        <p id="phase" class="phase">Awaiting launch</p>
+        <p id="status" class="status">Click start to launch the corridor.</p>
+        <p class="hint">A forward-moving star tunnel with warp gates, dust, and streaks. Bass drives velocity, mids bend the corridor, highs ignite sparkle and flare.</p>
+        <div class="panel-actions">
+          <button id="export-btn" type="button" class="hud-btn">Export Video</button>
+        </div>
+      </div>
+
+      <div class="panel panel-bands">
+        <p class="eyebrow">Band Split</p>
+        <div id="bands" class="bands"></div>
+      </div>
+    </main>
+
+    <div id="start-overlay">
+      <div class="start-card">
+        <p class="eyebrow">audio reactive flight</p>
+        <h2>Star Drive</h2>
+        <p class="start-copy">A darker space-flight alternate in Three.js. The song pushes you through a tunnel of stars, gates, and engine dust.</p>
+        <div class="start-actions">
+          <button id="start-btn" type="button">Preview</button>
+          <button id="export-btn-overlay" type="button" class="secondary-btn">Export Video</button>
+        </div>
+        <p class="start-meta">Export records one full playback at the current window size. For Instagram Reels, use a tall 9:16 browser window before exporting.</p>
+      </div>
+    </div>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

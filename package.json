@@ -1,0 +1,22 @@
+{
+  "name": "visuals",
+  "version": "1.0.0",
+  "description": "",
+  "main": "sketch.js",
+  "bin": {
+    "render-video": "./render-video"
+  },
+  "scripts": {
+    "render": "./render-video",
+    "render:video": "node tools/render-video.mjs",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "fft.js": "^4.0.4",
+    "puppeteer-core": "^24.26.1"
+  }
+}

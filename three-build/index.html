@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Void Lattice</title>
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://threejs.org/build/three.module.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <main class="hud">
+      <div class="panel">
+        <p class="eyebrow">three.js alternate build</p>
+        <h1>Void Lattice</h1>
+        <p id="phase" class="phase">Awaiting signal</p>
+        <p id="status" class="status">Click start to initialize the field.</p>
+        <p class="hint">This version uses a darker lattice composition, multi-band audio analysis, and kick/snare/hat pulses to drive structure, cuts, and sparks.</p>
+      </div>
+
+      <div class="panel panel-bands">
+        <p class="eyebrow">Band Split</p>
+        <div id="bands" class="bands"></div>
+      </div>
+    </main>
+
+    <div id="start-overlay">
+      <div class="start-card">
+        <p class="eyebrow">audio reactive particles</p>
+        <h2>Void Lattice</h2>
+        <p class="start-copy">A darker Three.js field with side rails, belt structures, and sparse sparks. Sub and bass drive the frame, mids torque the center, highs cut through the edges.</p>
+        <button id="start-btn" type="button">Start</button>
+      </div>
+    </div>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
