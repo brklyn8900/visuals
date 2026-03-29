@@ -2,8 +2,9 @@
 precision highp float;
 #endif
 
-uniform sampler2D texture;
-varying vec4 vertTexCoord;
+uniform sampler2D u_before;  // starting image (boy without clouds)
+uniform sampler2D u_after;   // revealed image (boy with clouds)
+varying vec2 vTexCoord;
 
 uniform float u_time;
 uniform float u_dissolve;       // 0 = intact, 1 = fully gone
@@ -44,13 +45,13 @@ float fbm(vec2 p) {
 // ---- Main ----
 
 void main() {
-    vec2 uv = vertTexCoord.st;
+    vec2 uv = vTexCoord;
 
     // --- Slow zoom toward the boy ---
     vec2 zoomCenter = vec2(0.5, 0.6);
     uv = (uv - zoomCenter) / u_zoom + zoomCenter;
 
-    // --- Displacement (cloud breathing) ---
+    // --- Displacement (cloud breathing) — only on upper half ---
     float upperFactor = smoothstep(0.7, 0.15, uv.y);
     float dn1 = fbm(uv * 3.0 + u_time * 0.06);
     float dn2 = fbm(uv * 3.0 + u_time * 0.06 + 100.0);
@@ -59,8 +60,9 @@ void main() {
 
     vec2 dispUV = clamp(uv + disp, 0.0, 1.0);
 
-    // --- Sample ---
-    vec4 col = texture2D(texture, dispUV);
+    // --- Sample both layers ---
+    vec4 beforeCol = texture2D(u_before, dispUV);
+    vec4 afterCol  = texture2D(u_after, dispUV);
 
     // --- Dissolve ---
     float dissolveNoise = fbm(uv * 5.0 + u_time * 0.025);
@@ -79,34 +81,46 @@ void main() {
 
     vec3 edgeColor = vec3(1.0, 0.65, 0.25) * atEdge * u_edgeGlow * 2.5;
 
-    // --- Color grading ---
-    float gray = dot(col.rgb, vec3(0.299, 0.587, 0.114));
-    vec3 bw = vec3(gray);
-    vec3 warm = vec3(
-        gray * 1.3 + 0.02,
-        gray * 0.92,
-        gray * 0.55
+    // --- Grade the "before" layer (cold B&W → warm amber) ---
+    float grayBefore = dot(beforeCol.rgb, vec3(0.299, 0.587, 0.114));
+    vec3 bwBefore = vec3(grayBefore);
+    vec3 warmBefore = vec3(
+        grayBefore * 1.3 + 0.02,
+        grayBefore * 0.92,
+        grayBefore * 0.55
     );
-    vec3 graded = mix(bw, warm, u_warmth);
-    graded = smoothstep(vec3(0.0), vec3(1.0), graded * 1.05);
+    vec3 gradedBefore = mix(bwBefore, warmBefore, u_warmth);
+    gradedBefore = smoothstep(vec3(0.0), vec3(1.0), gradedBefore * 1.05);
 
-    // --- Compose ---
-    vec3 burnThrough = bw * vec3(1.5, 1.05, 0.5) + vec3(0.12, 0.06, 0.01);
-    burnThrough = clamp(burnThrough, 0.0, 1.0);
-    vec3 result = mix(burnThrough, graded, visible) + edgeColor;
+    // --- Grade the "after" layer (revealed with warmth) ---
+    float grayAfter = dot(afterCol.rgb, vec3(0.299, 0.587, 0.114));
+    vec3 bwAfter = vec3(grayAfter);
+    vec3 warmAfter = vec3(
+        grayAfter * 1.4 + 0.03,
+        grayAfter * 0.95,
+        grayAfter * 0.5
+    );
+    // After layer always has some warmth — it's the apocalypse revealed
+    vec3 gradedAfter = mix(bwAfter, warmAfter, max(u_warmth, 0.3));
+    gradedAfter = smoothstep(vec3(0.0), vec3(1.0), gradedAfter * 1.05);
 
-    // --- Radial blast light ---
+    // --- Compose: before dissolves to reveal after ---
+    // visible=1 → before (no clouds), visible=0 → after (clouds)
+    vec3 result = mix(gradedAfter, gradedBefore, visible) + edgeColor;
+
+    // --- Radial blast light (from where the cloud appears) ---
     vec2 blastCenter = vec2(0.5, 0.32);
     float blastDist = length(uv - blastCenter);
     float lightFall = exp(-blastDist * 3.0);
     vec3 blastLight = vec3(1.0, 0.82, 0.45) * lightFall * u_lightIntensity;
     result += blastLight;
+
     // --- Film grain ---
     float grain = (hash(uv * 800.0 + u_time * 37.0) - 0.5) * 0.025;
     result += grain;
 
     // --- Vignette ---
-    float vig = 1.0 - dot(vertTexCoord.st - 0.5, vertTexCoord.st - 0.5) * 1.8;
+    float vig = 1.0 - dot(vTexCoord - 0.5, vTexCoord - 0.5) * 1.8;
     result *= clamp(vig, 0.0, 1.0);
 
     gl_FragColor = vec4(clamp(result, 0.0, 1.0), 1.0);

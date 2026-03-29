@@ -73,6 +73,7 @@ async function main() {
   console.log(`\nRendering with sketch: ${options.sketch}`);
   let stepStartedAt = Date.now();
   const resolvedImage = options.image ? await resolveImagePaths(options.image) : null;
+  const resolvedReveal = options.reveal ? await resolveImagePaths(options.reveal) : null;
 
   await runProcessingSketch({
     processingJava,
@@ -85,6 +86,7 @@ async function main() {
     jpegQuality: options.jpegQuality,
     frameCount: analysis.frameCount,
     imagePath: resolvedImage,
+    revealPath: resolvedReveal,
   });
   timings.renderMs = Date.now() - stepStartedAt;
 
@@ -162,6 +164,7 @@ function parseArgs(argv) {
     maxFrames: 0,
     keepFrames: false,
     image: null,
+    reveal: null,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -215,6 +218,9 @@ function parseArgs(argv) {
       options.keepFrames = true;
     } else if (arg === "--image") {
       options.image = next;
+      i += 1;
+    } else if (arg === "--reveal") {
+      options.reveal = next;
       i += 1;
     } else {
       throw new Error(`Unknown argument: ${arg}`);
@@ -303,7 +309,7 @@ function findProcessingJava() {
 }
 
 async function runProcessingSketch(options) {
-  const { processingJava, sketchDir, analysisPath, framesDir, width, height, fps, jpegQuality, frameCount, imagePath } = options;
+  const { processingJava, sketchDir, analysisPath, framesDir, width, height, fps, jpegQuality, frameCount, imagePath, revealPath } = options;
 
   const outputDir = path.join(sketchDir, "out");
   await fsp.mkdir(outputDir, { recursive: true });
@@ -327,6 +333,7 @@ async function runProcessingSketch(options) {
       String(jpegQuality),
       String(frameCount),
       ...(imagePath ? [imagePath] : []),
+      ...(revealPath ? [revealPath] : []),
     ],
     { stdio: ["ignore", "pipe", "pipe"], env }
   );

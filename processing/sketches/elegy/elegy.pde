@@ -38,12 +38,17 @@ float VIOLIN_START  = 114, VIOLIN_CRESC = 126, VIOLIN_QUIET = 132;
 float PIANO_START   = 139;
 
 // ================================================================
-//  MULTI-IMAGE
+//  MULTI-IMAGE (before = no clouds, after = with clouds)
 // ================================================================
-int numImages = 0;
-int[][] imagePixels;
-int[] source;
-PImage sourceFrame;
+int numBefore = 0;
+int[][] beforePixels;
+int[] beforeSource;
+PImage beforeFrame;
+
+int numAfter = 0;
+int[][] afterPixels;
+int[] afterSource;
+PImage afterFrame;
 
 // ================================================================
 //  PARTICLE SYSTEM
@@ -74,6 +79,7 @@ void setup() {
   surface.setVisible(false);
 
   String imageArg = null;
+  String revealArg = null;
   if (args != null && args.length >= 7) {
     analysisPath = args[0];
     framesDir = args[1];
@@ -81,6 +87,7 @@ void setup() {
     jpegQuality = Float.parseFloat(args[5]) / 100.0;
     targetFrameCount = Integer.parseInt(args[6]);
     if (args.length >= 8) imageArg = args[7];
+    if (args.length >= 9) revealArg = args[8];
   } else {
     println("Error: insufficient arguments");
     exit(); return;
@@ -91,26 +98,53 @@ void setup() {
     exit(); return;
   }
 
-  // Load images
-  String[] imagePaths = imageArg.split(",");
-  numImages = imagePaths.length;
   int totalPx = targetWidth * targetHeight;
-  imagePixels = new int[numImages][totalPx];
 
-  for (int i = 0; i < numImages; i++) {
-    PImage img = loadImage(imagePaths[i].trim());
+  // Load "before" images (--image, shown first)
+  String[] beforePaths = imageArg.split(",");
+  numBefore = beforePaths.length;
+  beforePixels = new int[numBefore][totalPx];
+  for (int i = 0; i < numBefore; i++) {
+    PImage img = loadImage(beforePaths[i].trim());
     if (img == null || img.width <= 0) {
-      println("Error: could not load image: " + imagePaths[i]);
+      println("Error: could not load before image: " + beforePaths[i]);
       exit(); return;
     }
     img.resize(targetWidth, targetHeight);
     img.loadPixels();
-    arrayCopy(img.pixels, imagePixels[i]);
-    println("Loaded image " + (i+1) + "/" + numImages + ": " + imagePaths[i].trim());
+    arrayCopy(img.pixels, beforePixels[i]);
+    println("Before " + (i+1) + "/" + numBefore + ": " + beforePaths[i].trim());
   }
 
-  source = new int[totalPx];
-  sourceFrame = createImage(targetWidth, targetHeight, ARGB);
+  // Load "after" images (--reveal, shown through dissolve)
+  if (revealArg != null && !revealArg.isEmpty()) {
+    String[] afterPaths = revealArg.split(",");
+    numAfter = afterPaths.length;
+    afterPixels = new int[numAfter][totalPx];
+    for (int i = 0; i < numAfter; i++) {
+      PImage img = loadImage(afterPaths[i].trim());
+      if (img == null || img.width <= 0) {
+        println("Error: could not load reveal image: " + afterPaths[i]);
+        exit(); return;
+      }
+      img.resize(targetWidth, targetHeight);
+      img.loadPixels();
+      arrayCopy(img.pixels, afterPixels[i]);
+      println("Reveal " + (i+1) + "/" + numAfter + ": " + afterPaths[i].trim());
+    }
+  } else {
+    // No reveal: use the same images for both layers (original behavior)
+    numAfter = numBefore;
+    afterPixels = new int[numAfter][totalPx];
+    for (int i = 0; i < numAfter; i++) {
+      arrayCopy(beforePixels[i], afterPixels[i]);
+    }
+  }
+
+  beforeSource = new int[totalPx];
+  afterSource = new int[totalPx];
+  beforeFrame = createImage(targetWidth, targetHeight, ARGB);
+  afterFrame = createImage(targetWidth, targetHeight, ARGB);
 
   // Init particles
   px = new float[MAX_PARTICLES];
@@ -132,7 +166,7 @@ void setup() {
   }
 
   canvas = createGraphics(targetWidth, targetHeight, P2D);
-  shader = loadShader("elegy.frag");
+  shader = loadShader("elegy.frag", "elegy.vert");
   frameRate(1000);
 }
 
@@ -140,49 +174,62 @@ void setup() {
 //  IMAGE BLENDING — timeline-based crossfades
 // ================================================================
 
-void buildSource(float time) {
-  if (numImages == 1) {
-    arrayCopy(imagePixels[0], source);
+void buildBeforeSource(float time) {
+  if (numBefore == 1) {
+    arrayCopy(beforePixels[0], beforeSource);
     return;
   }
-
-  if (numImages == 2) {
-    // Image a for intro/V1, crossfade to b during V2
-    if (time < V2_START) {
-      arrayCopy(imagePixels[0], source);
-    } else if (time < V2_END) {
-      float t = smoothstepF((time - V2_START) / (V2_END - V2_START));
-      blendImages(imagePixels[0], imagePixels[1], t);
-    } else {
-      arrayCopy(imagePixels[1], source);
-    }
-    return;
-  }
-
-  // 3+ images: a during intro/V1, crossfade to b in V2, crossfade to c in V3
+  // 2 before images: crossfade during V2
   if (time < V2_START) {
-    arrayCopy(imagePixels[0], source);
+    arrayCopy(beforePixels[0], beforeSource);
   } else if (time < V2_END) {
     float t = smoothstepF((time - V2_START) / (V2_END - V2_START));
-    blendImages(imagePixels[0], imagePixels[1], t);
-  } else if (time < V3_START) {
-    arrayCopy(imagePixels[1], source);
-  } else if (time < V3_END) {
-    float t = smoothstepF((time - V3_START) / (V3_END - V3_START));
-    blendImages(imagePixels[1], imagePixels[min(2, numImages - 1)], t);
+    blendInto(beforePixels[0], beforePixels[min(1, numBefore-1)], beforeSource, t);
   } else {
-    arrayCopy(imagePixels[min(2, numImages - 1)], source);
+    arrayCopy(beforePixels[min(1, numBefore-1)], beforeSource);
   }
 }
 
-void blendImages(int[] a, int[] b, float t) {
-  for (int i = 0; i < source.length; i++) {
+void buildAfterSource(float time) {
+  if (numAfter == 1) {
+    arrayCopy(afterPixels[0], afterSource);
+    return;
+  }
+  if (numAfter == 2) {
+    if (time < V3_START) {
+      arrayCopy(afterPixels[0], afterSource);
+    } else if (time < V3_END) {
+      float t = smoothstepF((time - V3_START) / (V3_END - V3_START));
+      blendInto(afterPixels[0], afterPixels[1], afterSource, t);
+    } else {
+      arrayCopy(afterPixels[1], afterSource);
+    }
+    return;
+  }
+  // 3+ after images: crossfade at V3 and pre-chorus
+  if (time < V3_START) {
+    arrayCopy(afterPixels[0], afterSource);
+  } else if (time < V3_END) {
+    float t = smoothstepF((time - V3_START) / (V3_END - V3_START));
+    blendInto(afterPixels[0], afterPixels[1], afterSource, t);
+  } else if (time < CHORUS_START) {
+    arrayCopy(afterPixels[1], afterSource);
+  } else if (time < CHORUS_SWELL) {
+    float t = smoothstepF((time - CHORUS_START) / (CHORUS_SWELL - CHORUS_START));
+    blendInto(afterPixels[1], afterPixels[min(2, numAfter-1)], afterSource, t);
+  } else {
+    arrayCopy(afterPixels[min(2, numAfter-1)], afterSource);
+  }
+}
+
+void blendInto(int[] a, int[] b, int[] dest, float t) {
+  for (int i = 0; i < dest.length; i++) {
     int ar = (a[i] >> 16) & 0xFF, ag = (a[i] >> 8) & 0xFF, ab = a[i] & 0xFF;
     int br = (b[i] >> 16) & 0xFF, bg = (b[i] >> 8) & 0xFF, bb = b[i] & 0xFF;
     int r = (int)lerp(ar, br, t);
     int g = (int)lerp(ag, bg, t);
     int bl = (int)lerp(ab, bb, t);
-    source[i] = 0xFF000000 | (r << 16) | (g << 8) | bl;
+    dest[i] = 0xFF000000 | (r << 16) | (g << 8) | bl;
   }
 }
 
@@ -424,11 +471,16 @@ void draw() {
 
     float time = currentFrame / targetFps;
 
-    // --- Build source image ---
-    buildSource(time);
-    sourceFrame.loadPixels();
-    arrayCopy(source, sourceFrame.pixels);
-    sourceFrame.updatePixels();
+    // --- Build both image layers ---
+    buildBeforeSource(time);
+    beforeFrame.loadPixels();
+    arrayCopy(beforeSource, beforeFrame.pixels);
+    beforeFrame.updatePixels();
+
+    buildAfterSource(time);
+    afterFrame.loadPixels();
+    arrayCopy(afterSource, afterFrame.pixels);
+    afterFrame.updatePixels();
 
     // --- Compute timeline parameters ---
     float dissolve   = getDissolve(time, energy);
@@ -438,11 +490,12 @@ void draw() {
     float lightInt   = getLightIntensity(time);
     float zoom       = getZoom(time);
 
-    // --- Render: image + shader ---
+    // --- Render: dual-texture shader ---
     canvas.beginDraw();
-    canvas.background(0);
-    canvas.image(sourceFrame, 0, 0);
+    canvas.shader(shader);
 
+    shader.set("u_before", beforeFrame);
+    shader.set("u_after", afterFrame);
     shader.set("u_time", time);
     shader.set("u_dissolve", dissolve);
     shader.set("u_warmth", warmth);
@@ -453,7 +506,8 @@ void draw() {
     shader.set("u_bass", bass);
     shader.set("u_energy", energy);
 
-    canvas.filter(shader);
+    canvas.rect(0, 0, targetWidth, targetHeight);
+    canvas.resetShader();
 
     // --- Particles on top ---
     updateParticles();
