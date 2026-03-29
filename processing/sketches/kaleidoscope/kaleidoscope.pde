@@ -190,14 +190,13 @@ void draw() {
     shader.set("u_energy", energy);
 
     // Fold: audio-driven blend between original and kaleidoscope
-    // Bass + energy push toward kaleidoscope, quiet = original image
     float foldTarget = energy * 0.5 + bass * 0.3 + sub * 0.2;
     foldTarget = constrain(foldTarget, 0, 0.85);
-    // Kick punches it toward full fold briefly
-    foldTarget += kick * 0.35;
+    // Kick + snare punch toward full fold
+    foldTarget += kick * 0.35 + snare * 0.25;
     foldTarget = constrain(foldTarget, 0, 1);
-    // Smooth so it unfolds gradually, not instantly
-    float smoothRate = (foldTarget > foldSmoothed) ? 0.12 : 0.06; // folds faster than it unfolds
+    // Smooth: snappier attack, gradual release
+    float smoothRate = (foldTarget > foldSmoothed) ? 0.18 : 0.06;
     foldSmoothed = foldSmoothed + (foldTarget - foldSmoothed) * smoothRate;
     shader.set("u_fold", foldSmoothed);
 

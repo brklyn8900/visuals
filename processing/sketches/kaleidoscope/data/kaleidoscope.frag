@@ -28,22 +28,27 @@ float vnoise(vec2 p) {
 void main() {
     vec2 uv = vertTexCoord.st;
 
-    // --- Segments: 3–5, evolves slowly ---
+    // --- Energy with power curve: quiet stays calm, loud explodes ---
+    float e = pow(u_energy, 1.4);
+
+    // --- Segments: 3–5, snare momentarily shatters into more ---
     float segments = floor(3.0 + u_progress * 2.0);
     segments = clamp(segments, 3.0, 5.0);
+    segments += segments * step(0.3, u_snare) * u_snare;
+    segments = floor(segments);
 
-    // --- Rotation: slow base, energy gives it momentum ---
-    float rotation = u_time * (0.05 + u_mid * 0.03 + u_energy * 0.02);
+    // --- Rotation: slow base, energy + snare jolt ---
+    float rotation = u_time * (0.05 + u_mid * 0.03 + e * 0.02);
+    rotation += u_snare * 0.25;
 
     // --- Zoom: breathes with bass, energy widens the range ---
-    float breathDepth = 0.03 + u_energy * 0.06;
-    float zoom = 1.0 + sin(u_time * 0.25) * breathDepth + u_bass * 0.06;
-    zoom += u_kick * 0.08;
+    float breathDepth = 0.03 + e * 0.08;
+    float zoom = 1.0 + sin(u_time * 0.25) * breathDepth + u_bass * 0.08;
+    zoom += u_kick * 0.1 + u_snare * 0.06;
     vec2 centered = (uv - 0.5) / zoom;
 
     // --- Displacement warp on loud moments ---
-    // Ripple distortion that scales with energy — keeps image readable but adds motion
-    float warpStrength = u_energy * 0.012 + u_kick * 0.008;
+    float warpStrength = e * 0.016 + u_kick * 0.01 + u_snare * 0.008;
     if (warpStrength > 0.001) {
         float wx = vnoise(uv * 6.0 + u_time * 0.4);
         float wy = vnoise(uv * 6.0 + u_time * 0.4 + 50.0);
@@ -65,11 +70,18 @@ void main() {
     vec2 finalUV = mix(origUV, kalUV, u_fold);
     finalUV = clamp(finalUV, 0.0, 1.0);
 
+    // --- Mosaic: snare shatters into blocks ---
+    if (u_snare > 0.1) {
+        float mosaicRes = mix(120.0, 18.0, smoothstep(0.1, 0.8, u_snare));
+        finalUV = (floor(finalUV * mosaicRes) + 0.5) / mosaicRes;
+        finalUV = clamp(finalUV, 0.0, 1.0);
+    }
+
     // --- Sample ---
     vec4 col = texture2D(texture, finalUV);
 
-    // --- Chromatic split on high energy ---
-    float aberr = u_energy * 0.003 + u_kick * 0.002;
+    // --- Chromatic split: energy + kick + snare ---
+    float aberr = e * 0.004 + u_kick * 0.003 + u_snare * 0.004;
     if (aberr > 0.0008) {
         vec2 dir = normalize(finalUV - 0.5 + 0.001);
         col.r = texture2D(texture, clamp(finalUV + dir * aberr, 0.0, 1.0)).r;
@@ -86,22 +98,22 @@ void main() {
     }
 
     // --- Dynamic contrast: louder = punchier image ---
-    float contrast = 1.0 + u_energy * 0.25;
+    float contrast = 1.0 + e * 0.35;
     col.rgb = (col.rgb - 0.5) * contrast + 0.5;
 
     // --- Saturation boost on energy ---
     float gray = dot(col.rgb, vec3(0.299, 0.587, 0.114));
-    col.rgb = mix(vec3(gray), col.rgb, 1.0 + u_energy * 0.35);
+    col.rgb = mix(vec3(gray), col.rgb, 1.0 + e * 0.45);
 
-    // --- Brightness pulse on kick ---
-    col.rgb *= 1.0 + u_kick * 0.15;
+    // --- Brightness pulse: kick + snare flash ---
+    col.rgb *= 1.0 + u_kick * 0.15 + u_snare * 0.25;
 
     // --- Gentle warmth drift ---
     float warmth = u_progress * 0.2;
     col.rgb *= vec3(1.0 + warmth * 0.08, 1.0, 1.0 - warmth * 0.05);
 
     // --- Vignette: tightens on loud moments ---
-    float vigStrength = 1.8 + u_energy * 0.8;
+    float vigStrength = 1.8 + e * 1.0;
     float vig = 1.0 - dot(uv - 0.5, uv - 0.5) * vigStrength;
     col.rgb *= clamp(vig, 0.0, 1.0);
 
