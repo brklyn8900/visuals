@@ -279,21 +279,20 @@ float getZoom(float time) {
 }
 
 float getGlitch(float time, float energy, float kick, float snare) {
+  // Very restrained — glitches are rare punctuation, not texture
   float g;
   if      (time < INTRO_END)     g = 0;
-  else if (time < V1_END)        g = 0.03; // barely perceptible
-  else if (time < V2_END)        g = map(time, V2_START, V2_END, 0.03, 0.1);
-  else if (time < V3_END)        g = map(time, V3_START, V3_END, 0.1, 0.25);
-  else if (time < PRE_END)       g = map(time, PRE_START, PRE_END, 0.25, 0.4);
-  else if (time < CHORUS_SWELL)  g = map(time, CHORUS_START, CHORUS_SWELL, 0.4, 0.6);
-  else if (time < WHISPER_START) g = map(time, CHORUS_SWELL, WHISPER_START, 0.6, 0.85);
-  else if (time < VIOLIN_START)  g = map(time, WHISPER_START, VIOLIN_START, 0.85, 0.15); // drops with whisper
-  else if (time < VIOLIN_CRESC)  g = map(time, VIOLIN_START, VIOLIN_CRESC, 0.15, 0.7);
-  else if (time < VIOLIN_QUIET)  g = map(time, VIOLIN_CRESC, VIOLIN_QUIET, 0.7, 0.9);
-  else if (time < PIANO_START)   g = map(time, VIOLIN_QUIET, PIANO_START, 0.9, 0.4);
-  else                           g = map(time, PIANO_START, PIANO_START + 20, 0.4, 0.1);
-  // Audio spikes push glitch harder
-  g += kick * 0.15 + snare * 0.1 + energy * 0.05;
+  else if (time < V1_END)        g = 0;
+  else if (time < V2_END)        g = 0.02;
+  else if (time < V3_END)        g = map(time, V3_START, V3_END, 0.02, 0.08);
+  else if (time < PRE_END)       g = map(time, PRE_START, PRE_END, 0.08, 0.15);
+  else if (time < CHORUS_SWELL)  g = map(time, CHORUS_START, CHORUS_SWELL, 0.15, 0.25);
+  else if (time < WHISPER_START) g = map(time, CHORUS_SWELL, WHISPER_START, 0.25, 0.4);
+  else if (time < VIOLIN_START)  g = map(time, WHISPER_START, VIOLIN_START, 0.4, 0.05);
+  else if (time < VIOLIN_CRESC)  g = map(time, VIOLIN_START, VIOLIN_CRESC, 0.05, 0.3);
+  else if (time < VIOLIN_QUIET)  g = map(time, VIOLIN_CRESC, VIOLIN_QUIET, 0.3, 0.45);
+  else if (time < PIANO_START)   g = map(time, VIOLIN_QUIET, PIANO_START, 0.45, 0.15);
+  else                           g = map(time, PIANO_START, PIANO_START + 20, 0.15, 0.03);
   return constrain(g, 0, 1);
 }
 

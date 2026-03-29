@@ -54,29 +54,27 @@ void main() {
     vec2 zoomCenter = vec2(0.5, 0.6);
     uv = (uv - zoomCenter) / u_zoom + zoomCenter;
 
-    // --- Camera shake on kicks ---
+    // --- Camera shake on kicks (very subtle) ---
     uv += vec2(
-        sin(u_time * 47.0) * u_kick * 0.004,
-        cos(u_time * 63.0) * u_kick * 0.003
+        sin(u_time * 47.0) * u_kick * 0.002,
+        cos(u_time * 63.0) * u_kick * 0.001
     );
 
-    // --- Horizontal glitch lines ---
+    // --- Rare glitch flickers ---
+    // Only triggers on strong kicks/snares, and only a few rows at a time
     if (u_glitch > 0.01) {
-        float row = floor(vertTexCoord.y * u_resolution.y * 0.5);
-        float rowSeed = hash(vec2(row, floor(u_time * 4.0)));
+        // Time-gated: glitch only fires for brief windows (~0.1s every few seconds)
+        float glitchWindow = step(0.93, fract(u_time * 0.3 + hash(vec2(floor(u_time * 0.3), 0.0))));
 
-        // Sparse displaced rows — more rows affected as glitch increases
-        if (rowSeed > (1.0 - u_glitch * 0.12)) {
-            float shift = (hash(vec2(row * 3.7, u_time * 11.0)) - 0.5) * u_glitch * 0.06;
-            // Kick and snare make glitch lines wider
-            shift *= 1.0 + u_kick * 2.0 + u_snare * 1.5;
-            uv.x += shift;
-        }
+        if (glitchWindow > 0.0 && (u_kick > 0.5 || u_snare > 0.5)) {
+            float row = floor(vertTexCoord.y * u_resolution.y);
+            float rowSeed = hash(vec2(row, floor(u_time * 6.0)));
 
-        // Occasional thick block displacement
-        float blockSeed = hash(vec2(floor(vertTexCoord.y * 30.0), floor(u_time * 2.0)));
-        if (blockSeed > (1.0 - u_glitch * 0.03) && u_kick > 0.3) {
-            uv.x += (hash(vec2(blockSeed, u_time)) - 0.5) * u_glitch * 0.1;
+            // Very few rows: only 2-3% of rows shift
+            if (rowSeed > 0.975) {
+                float shift = (hash(vec2(row * 3.7, u_time * 11.0)) - 0.5) * u_glitch * 0.025;
+                uv.x += shift;
+            }
         }
     }
 
@@ -89,11 +87,11 @@ void main() {
 
     vec2 dispUV = clamp(uv + disp, 0.0, 1.0);
 
-    // --- Sample with chromatic aberration ---
-    float aberr = u_glitch * 0.004 + u_snare * 0.003;
+    // --- Sample with very subtle chromatic aberration ---
+    // Only visible during strong hits, and very slight
+    float aberr = u_glitch * 0.0015 * u_kick;
     vec4 col;
-    if (aberr > 0.0005) {
-        // Split R/G/B channels horizontally
+    if (aberr > 0.0003) {
         vec2 rUV = clamp(dispUV + vec2(aberr, 0.0), 0.0, 1.0);
         vec2 bUV = clamp(dispUV - vec2(aberr, 0.0), 0.0, 1.0);
         col.r = texture2D(texture, rUV).r;
@@ -145,11 +143,11 @@ void main() {
     result += blastLight;
     result += vec3(1.0, 0.9, 0.6) * u_kick * u_lightIntensity * 0.3 * lightFall;
 
-    // --- Glitch color flash on snare ---
-    if (u_snare > 0.5 && u_glitch > 0.1) {
+    // --- Rare warm flash on strong snare ---
+    if (u_snare > 0.7 && u_glitch > 0.3) {
         float flashRow = hash(vec2(floor(vertTexCoord.y * 80.0), floor(u_time * 5.0)));
-        if (flashRow > 0.92) {
-            result = mix(result, vec3(1.0, 0.85, 0.5), u_snare * u_glitch * 0.4);
+        if (flashRow > 0.985) {
+            result = mix(result, vec3(1.0, 0.85, 0.5), u_snare * 0.15);
         }
     }
 
