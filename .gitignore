@@ -26,6 +26,9 @@ pnpm-debug.log*
 .render-cache/
 exports/
 
+# Processing IDE build output
+processing/sketches/*/out/
+
 # General logs / temp files
 *.log
 tmp/

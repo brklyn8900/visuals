@@ -1,12 +1,9 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
-import http from "node:http";
 import path from "node:path";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
-
-import puppeteer from "puppeteer-core";
+import { spawn, spawnSync } from "node:child_process";
 
 import {
   BAND_DEFS,
@@ -19,8 +16,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, "..");
 
-const DEFAULT_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-
 async function main() {
   const startedAt = Date.now();
   const options = parseArgs(process.argv.slice(2));
@@ -32,22 +27,29 @@ async function main() {
   }
 
   const inputPath = path.resolve(options.input);
+  const sketchDir = path.join(ROOT, "processing", "sketches", options.sketch);
   const outputPath = path.resolve(options.output || defaultOutputPath(inputPath, options));
-  const buildPath = path.join(ROOT, options.build);
-  const chromePath = options.chrome || process.env.CHROME_PATH || DEFAULT_CHROME;
 
   if (!fs.existsSync(inputPath)) {
     throw new Error(`Audio file not found: ${inputPath}`);
   }
-  if (!fs.existsSync(buildPath)) {
-    throw new Error(`Build not found: ${buildPath}`);
+  if (!fs.existsSync(sketchDir)) {
+    throw new Error(`Sketch not found: ${sketchDir}`);
   }
-  if (!fs.existsSync(chromePath)) {
-    throw new Error(`Chrome executable not found: ${chromePath}`);
+
+  const processingJava = findProcessingJava();
+  if (!processingJava) {
+    throw new Error(
+      "processing-java not found in PATH.\n" +
+      "Install Processing: brew install --cask processing\n" +
+      "Then open Processing.app > Tools > Install \"processing-java\""
+    );
   }
 
   await fsp.mkdir(path.dirname(outputPath), { recursive: true });
 
+  // Audio analysis
+  console.log("Analyzing audio...");
   const { analysis, duration, timings: analysisTimings } = await analyzeAudio(inputPath, {
     fps: options.fps,
     sampleRate: options.sampleRate,
@@ -55,84 +57,68 @@ async function main() {
   });
   Object.assign(timings, analysisTimings);
 
+  // Write analysis to cache
   const cacheId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const cacheDir = path.join(ROOT, ".render-cache", cacheId);
-  await fsp.mkdir(cacheDir, { recursive: true });
+  const framesDir = path.join(cacheDir, "frames");
+  await fsp.mkdir(framesDir, { recursive: true });
+
   const analysisPath = path.join(cacheDir, "analysis.json");
   await fsp.writeFile(analysisPath, JSON.stringify(analysis));
 
-  const server = await createStaticServer(ROOT);
+  console.log(`Analysis: ${analysis.frameCount} frames, ${analysis.duration.toFixed(2)}s`);
+  console.log(`Probe ${analysisTimings.probeMs}ms | Decode ${analysisTimings.decodeMs}ms | Analyze ${analysisTimings.analysisMs}ms`);
 
-  let browser;
-  try {
-    let stepStartedAt = Date.now();
-    browser = await puppeteer.launch({
-      executablePath: chromePath,
-      headless: true,
-      args: [
-        "--autoplay-policy=no-user-gesture-required",
-        "--hide-scrollbars",
-        "--mute-audio",
-      ],
-    });
+  // Run Processing sketch
+  console.log(`\nRendering with sketch: ${options.sketch}`);
+  let stepStartedAt = Date.now();
+  const resolvedImage = options.image ? await resolveImagePaths(options.image) : null;
 
-    const page = await browser.newPage();
-    page.on("console", (message) => {
-      if (message.type() === "error") {
-        const text = message.text();
-        if (text) {
-          console.error(`[page:error] ${text}`);
-        }
-      }
-    });
-    page.on("pageerror", (error) => {
-      console.error(`[page:error] ${error.message}`);
-    });
+  await runProcessingSketch({
+    processingJava,
+    sketchDir,
+    analysisPath,
+    framesDir,
+    width: options.width,
+    height: options.height,
+    fps: options.fps,
+    jpegQuality: options.jpegQuality,
+    frameCount: analysis.frameCount,
+    imagePath: resolvedImage,
+  });
+  timings.renderMs = Date.now() - stepStartedAt;
 
-    await page.setViewport({
-      width: options.width,
-      height: options.height,
-      deviceScaleFactor: 1,
-    });
-
-    const analysisUrl = `/.render-cache/${cacheId}/analysis.json`;
-    const pageUrl = `http://127.0.0.1:${server.port}/${options.build}/index.html?offline=1&analysis=${encodeURIComponent(analysisUrl)}`;
-    await page.goto(pageUrl, { waitUntil: "networkidle0" });
-    await page.waitForFunction(
-      () => window.__VISUAL_EXPORT && (window.__VISUAL_EXPORT.ready === true || Boolean(window.__VISUAL_EXPORT.error)),
-      { timeout: 30000 }
-    );
-
-    const exportStatus = await page.evaluate(() => ({
-      ready: window.__VISUAL_EXPORT?.ready === true,
-      error: window.__VISUAL_EXPORT?.error || "",
-    }));
-    if (!exportStatus.ready) {
-      throw new Error(`Offline renderer failed to initialize: ${exportStatus.error || "unknown error"}`);
-    }
-    timings.bootstrapMs = Date.now() - stepStartedAt;
-
-    stepStartedAt = Date.now();
-    await renderToVideo({
-      page,
-      inputPath,
-      outputPath,
-      width: options.width,
-      height: options.height,
-      fps: options.fps,
-      frameCount: analysis.frameCount,
-      jpegQuality: options.jpegQuality,
-      crf: options.crf,
-      duration: analysis.duration,
-    });
-    timings.renderMs = Date.now() - stepStartedAt;
-  } finally {
-    if (browser) {
-      await browser.close();
-    }
-    await closeServer(server.instance);
+  // Verify frames
+  const frameFiles = await fsp.readdir(framesDir);
+  const jpegCount = frameFiles.filter((f) => f.endsWith(".jpg")).length;
+  if (jpegCount === 0) {
+    throw new Error("Processing sketch produced no frames");
+  }
+  if (jpegCount < analysis.frameCount) {
+    console.warn(`Warning: expected ${analysis.frameCount} frames, got ${jpegCount}`);
   }
 
+  // Encode with ffmpeg
+  console.log("\nEncoding video...");
+  stepStartedAt = Date.now();
+  await encodeVideo({
+    framesDir,
+    inputPath,
+    outputPath,
+    fps: options.fps,
+    crf: options.crf,
+    duration: analysis.duration,
+  });
+  timings.encodeMs = Date.now() - stepStartedAt;
+
+  // Cleanup frames
+  if (!options.keepFrames) {
+    await fsp.rm(cacheDir, { recursive: true, force: true });
+  } else {
+    console.log(`Frames kept at: ${framesDir}`);
+  }
+
+  // Summary
   const finishedAt = Date.now();
   const outputStats = await fsp.stat(outputPath);
   const outputMeta = probeMediaMetadata(outputPath);
@@ -140,7 +126,7 @@ async function main() {
   printRenderSummary({
     startedAt,
     finishedAt,
-    build: options.build,
+    sketch: options.sketch,
     preset: options.preset,
     inputPath,
     outputPath,
@@ -151,7 +137,7 @@ async function main() {
     sourceDuration: duration,
     renderDuration: analysis.duration,
     outputDuration: outputMeta.duration || analysis.duration,
-    analysisSampleRate: sampleRate,
+    analysisSampleRate: options.sampleRate,
     outputSize: outputStats.size,
     outputVideoCodec: outputMeta.videoCodec,
     outputAudioCodec: outputMeta.audioCodec,
@@ -164,7 +150,7 @@ async function main() {
 function parseArgs(argv) {
   const preset = PRESETS.reel;
   const options = {
-    build: "space-build",
+    sketch: "demo",
     preset: "reel",
     fps: 30,
     width: preset.width,
@@ -174,6 +160,8 @@ function parseArgs(argv) {
     crf: 18,
     help: false,
     maxFrames: 0,
+    keepFrames: false,
+    image: null,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -188,13 +176,13 @@ function parseArgs(argv) {
     } else if (arg === "--output" || arg === "-o") {
       options.output = next;
       i += 1;
-    } else if (arg === "--build") {
-      options.build = next;
+    } else if (arg === "--sketch") {
+      options.sketch = next;
       i += 1;
     } else if (arg === "--preset") {
       const dimensions = PRESETS[next];
       if (!dimensions) {
-        throw new Error(`Unknown preset: ${next}`);
+        throw new Error(`Unknown preset: ${next}. Valid: ${Object.keys(PRESETS).join(", ")}`);
       }
       options.preset = next;
       options.width = dimensions.width;
@@ -220,11 +208,13 @@ function parseArgs(argv) {
     } else if (arg === "--crf") {
       options.crf = Number.parseInt(next, 10);
       i += 1;
-    } else if (arg === "--chrome") {
-      options.chrome = next;
-      i += 1;
     } else if (arg === "--max-frames") {
       options.maxFrames = Number.parseInt(next, 10);
+      i += 1;
+    } else if (arg === "--keep-frames") {
+      options.keepFrames = true;
+    } else if (arg === "--image") {
+      options.image = next;
       i += 1;
     } else {
       throw new Error(`Unknown argument: ${arg}`);
@@ -236,47 +226,170 @@ function parseArgs(argv) {
 
 function printHelp() {
   console.log(`Usage:
-  node tools/render-video.mjs --input ./Metallic_Drive_II.wav --output ./out.mp4 --preset reel
+  node tools/render-processing.mjs --input ./audio.wav [options]
 
 Options:
-  --input, -i         Path to the source audio file
+  --input, -i         Path to the source audio file (required)
   --output, -o        Output video path (defaults beside the input file)
-  --build             Build folder to render (default: space-build)
-  --preset            reel | feed | square | landscape
+  --sketch            Processing sketch name (default: demo)
+  --preset            reel | feed | square | landscape (default: reel)
   --width             Custom output width
   --height            Custom output height
   --fps               Frames per second (default: 30)
   --sample-rate       Audio analysis sample rate (default: 44100)
-  --jpeg-quality      Screenshot JPEG quality 1-100 (default: 92)
+  --jpeg-quality      JPEG quality 1-100 (default: 92)
   --crf               ffmpeg x264 CRF value (default: 18)
-  --chrome            Override Chrome executable path
-  --max-frames        Render only the first N frames (useful for tests)
+  --max-frames        Render only the first N frames
+  --keep-frames       Keep rendered frames after encoding
+  --image             Image path, comma-separated list, or directory (for pixelsort)
   --help, -h          Show this message
 `);
 }
 
 function defaultOutputPath(inputPath, options) {
   const parsed = path.parse(inputPath);
-  return path.join(parsed.dir, `${parsed.name}-${options.build}.mp4`);
+  return path.join(parsed.dir, `${parsed.name}-${options.sketch}.mp4`);
 }
 
-async function renderToVideo(options) {
+async function resolveImagePaths(imageArg) {
+  // Comma-separated list
+  if (imageArg.includes(",")) {
+    const paths = imageArg.split(",").map((p) => path.resolve(p.trim()));
+    for (const p of paths) {
+      if (!fs.existsSync(p)) throw new Error(`Image not found: ${p}`);
+    }
+    return paths.join(",");
+  }
+
+  const resolved = path.resolve(imageArg);
+  const stat = await fsp.stat(resolved);
+
+  // Directory: load all images sorted alphabetically
+  if (stat.isDirectory()) {
+    const files = await fsp.readdir(resolved);
+    const images = files
+      .filter((f) => /\.(png|jpe?g|gif|bmp|tiff?)$/i.test(f))
+      .sort()
+      .map((f) => path.join(resolved, f));
+    if (images.length === 0) {
+      throw new Error(`No image files found in ${resolved}`);
+    }
+    console.log(`Found ${images.length} images in ${imageArg}`);
+    return images.join(",");
+  }
+
+  // Single file
+  return resolved;
+}
+
+function findProcessingJava() {
+  const result = spawnSync("which", ["processing-java"], { encoding: "utf8" });
+  if (result.status === 0 && result.stdout.trim()) {
+    return result.stdout.trim();
+  }
+
+  // Check common macOS locations
+  const candidates = [
+    "/usr/local/bin/processing-java",
+    path.join(process.env.HOME || "", "bin", "processing-java"),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+async function runProcessingSketch(options) {
+  const { processingJava, sketchDir, analysisPath, framesDir, width, height, fps, jpegQuality, frameCount, imagePath } = options;
+
+  const outputDir = path.join(sketchDir, "out");
+  await fsp.mkdir(outputDir, { recursive: true });
+
+  const env = { ...process.env };
+  // Hide Java app from macOS Dock and app switcher
+  env._JAVA_OPTIONS = [env._JAVA_OPTIONS, "-Dapple.awt.UIElement=true"].filter(Boolean).join(" ");
+
+  const proc = spawn(
+    processingJava,
+    [
+      `--sketch=${sketchDir}`,
+      `--output=${outputDir}`,
+      "--force",
+      "--run",
+      analysisPath,
+      framesDir,
+      String(width),
+      String(height),
+      String(fps),
+      String(jpegQuality),
+      String(frameCount),
+      ...(imagePath ? [imagePath] : []),
+    ],
+    { stdio: ["ignore", "pipe", "pipe"], env }
+  );
+
+  let stderr = "";
+  const inlineProgress =
+    Boolean(process.stdout.isTTY) &&
+    typeof process.stdout.clearLine === "function" &&
+    typeof process.stdout.cursorTo === "function";
+
+  proc.stdout.on("data", (chunk) => {
+    const lines = String(chunk).split("\n");
+    for (const line of lines) {
+      const match = line.match(/^FRAME:(\d+)\/(\d+)$/);
+      if (match) {
+        const current = Number.parseInt(match[1], 10);
+        const total = Number.parseInt(match[2], 10);
+        const percent = (current / total) * 100;
+        const text = `Rendered ${current}/${total} frames (${percent.toFixed(1)}%)`;
+        if (inlineProgress) {
+          process.stdout.clearLine(0);
+          process.stdout.cursorTo(0);
+          process.stdout.write(text);
+        } else if (current % Math.max(1, Math.floor(fps)) === 0 || current === total) {
+          console.log(text);
+        }
+      }
+    }
+  });
+
+  proc.stderr.on("data", (chunk) => {
+    stderr += String(chunk);
+  });
+
+  const [code] = await once(proc, "close");
+
+  if (inlineProgress) {
+    process.stdout.write("\n");
+  }
+
+  if (code !== 0) {
+    const errorLines = stderr.split("\n").filter((l) => l.trim()).slice(-10).join("\n");
+    throw new Error(`Processing sketch exited with code ${code}\n${errorLines}`);
+  }
+}
+
+async function encodeVideo(options) {
+  const { framesDir, inputPath, outputPath, fps, crf, duration } = options;
+
+  const framePath = path.join(framesDir, "frame-%06d.jpg");
+
   const ffmpeg = spawn(
     "ffmpeg",
     [
       "-y",
-      "-f",
-      "image2pipe",
-      "-vcodec",
-      "mjpeg",
       "-framerate",
-      String(options.fps),
+      String(fps),
       "-i",
-      "pipe:0",
+      framePath,
       "-i",
-      options.inputPath,
+      inputPath,
       "-t",
-      String(options.duration),
+      String(duration),
       "-map",
       "0:v:0",
       "-map",
@@ -286,7 +399,7 @@ async function renderToVideo(options) {
       "-preset",
       "medium",
       "-crf",
-      String(options.crf),
+      String(crf),
       "-pix_fmt",
       "yuv420p",
       "-c:a",
@@ -296,9 +409,9 @@ async function renderToVideo(options) {
       "-movflags",
       "+faststart",
       "-shortest",
-      options.outputPath,
+      outputPath,
     ],
-    { stdio: ["pipe", "inherit", "pipe"] }
+    { stdio: ["ignore", "inherit", "pipe"] }
   );
 
   let stderr = "";
@@ -306,126 +419,10 @@ async function renderToVideo(options) {
     stderr += String(chunk);
   });
 
-  const logInterval = Math.max(1, Math.floor(options.fps));
-  const inlineProgress =
-    Boolean(process.stdout.isTTY) &&
-    typeof process.stdout.clearLine === "function" &&
-    typeof process.stdout.cursorTo === "function";
-
-  for (let frame = 0; frame < options.frameCount; frame += 1) {
-    await options.page.evaluate((frameIndex) => window.__VISUAL_EXPORT.renderFrame(frameIndex), frame);
-    const image = await options.page.screenshot({
-      type: "jpeg",
-      quality: options.jpegQuality,
-    });
-
-    if (!ffmpeg.stdin.write(image)) {
-      await once(ffmpeg.stdin, "drain");
-    }
-
-    if (frame % logInterval === 0 || frame === options.frameCount - 1) {
-      const percent = ((frame + 1) / options.frameCount) * 100;
-      const line = `Rendered ${frame + 1}/${options.frameCount} frames (${percent.toFixed(1)}%)`;
-      if (inlineProgress) {
-        process.stdout.clearLine(0);
-        process.stdout.cursorTo(0);
-        process.stdout.write(line);
-      } else {
-        console.log(line);
-      }
-    }
-  }
-
-  if (inlineProgress) {
-    process.stdout.write("\n");
-  }
-
-  ffmpeg.stdin.end();
   const [code] = await once(ffmpeg, "close");
   if (code !== 0) {
     throw new Error(stderr || "ffmpeg failed while encoding the video.");
   }
-}
-
-async function createStaticServer(root) {
-  const server = http.createServer(async (req, res) => {
-    try {
-      const requestUrl = new URL(req.url, "http://127.0.0.1");
-      let filePath = path.join(root, decodeURIComponent(requestUrl.pathname));
-
-      if (!filePath.startsWith(root)) {
-        res.writeHead(403);
-        res.end("Forbidden");
-        return;
-      }
-
-      let stats = await fsp.stat(filePath).catch(() => null);
-      if (stats && stats.isDirectory()) {
-        filePath = path.join(filePath, "index.html");
-        stats = await fsp.stat(filePath).catch(() => null);
-      }
-
-      if (!stats || !stats.isFile()) {
-        res.writeHead(404);
-        res.end("Not found");
-        return;
-      }
-
-      res.setHeader("Content-Type", contentType(filePath));
-      res.setHeader("Cache-Control", "no-store");
-      fs.createReadStream(filePath).pipe(res);
-    } catch (error) {
-      res.writeHead(500);
-      res.end(String(error));
-    }
-  });
-
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  return {
-    instance: server,
-    port: address.port,
-  };
-}
-
-function contentType(filePath) {
-  const ext = path.extname(filePath).toLowerCase();
-  switch (ext) {
-    case ".html":
-      return "text/html; charset=utf-8";
-    case ".js":
-      return "text/javascript; charset=utf-8";
-    case ".css":
-      return "text/css; charset=utf-8";
-    case ".json":
-      return "application/json; charset=utf-8";
-    case ".png":
-      return "image/png";
-    case ".jpg":
-    case ".jpeg":
-      return "image/jpeg";
-    case ".wav":
-      return "audio/wav";
-    case ".mp3":
-      return "audio/mpeg";
-    default:
-      return "application/octet-stream";
-  }
-}
-
-async function closeServer(server) {
-  if (!server) {
-    return;
-  }
-  await new Promise((resolve, reject) => {
-    server.close((error) => {
-      if (error) {
-        reject(error);
-      } else {
-        resolve();
-      }
-    });
-  });
 }
 
 function printRenderSummary(summary) {
@@ -433,8 +430,8 @@ function printRenderSummary(summary) {
   const realtimeRate = summary.renderDuration / Math.max(totalMs / 1000, 1e-6);
   const displayFps = summary.fps.toFixed(2).replace(/\.00$/, "");
   const lines = [
-    ["Pipeline", "offline audio analysis -> frame render -> H.264/AAC encode"],
-    ["Build", summary.build],
+    ["Pipeline", "offline audio analysis -> Processing frame render -> H.264/AAC encode"],
+    ["Sketch", summary.sketch],
     ["Input", displayPath(summary.inputPath)],
     ["Output", displayPath(summary.outputPath)],
     ["Format", `${summary.width}x${summary.height} @ ${displayFps} fps (${summary.preset})`],
@@ -470,8 +467,8 @@ function formatTiming(timings, totalMs) {
     `probe ${formatElapsed(timings.probeMs || 0)}`,
     `decode ${formatElapsed(timings.decodeMs || 0)}`,
     `analyze ${formatElapsed(timings.analysisMs || 0)}`,
-    `bootstrap ${formatElapsed(timings.bootstrapMs || 0)}`,
     `render ${formatElapsed(timings.renderMs || 0)}`,
+    `encode ${formatElapsed(timings.encodeMs || 0)}`,
   ].join(" | ");
 }
 
