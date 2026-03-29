@@ -5,12 +5,15 @@ precision highp float;
 uniform sampler2D texture;
 varying vec4 vertTexCoord;
 
+uniform vec2 u_resolution;
 uniform float u_time;
 uniform float u_dissolve;       // 0 = intact, 1 = fully gone
 uniform float u_warmth;         // 0 = cold B&W, 1 = full amber
 uniform float u_displace;       // displacement strength
 uniform float u_edgeGlow;       // glow at dissolve boundary
 uniform float u_lightIntensity; // radial blast light
+uniform float u_zoom;           // 1.0 = no zoom, >1.0 = push in
+uniform float u_glitch;         // 0 = clean, 1 = heavy glitch
 
 // Audio
 uniform float u_bass, u_mid, u_highMid, u_presence;
@@ -47,8 +50,37 @@ float fbm(vec2 p) {
 void main() {
     vec2 uv = vertTexCoord.st;
 
-    // --- Displacement ---
-    // Stronger in upper half (mushroom cloud area)
+    // --- Slow zoom toward the boy ---
+    vec2 zoomCenter = vec2(0.5, 0.6);
+    uv = (uv - zoomCenter) / u_zoom + zoomCenter;
+
+    // --- Camera shake on kicks ---
+    uv += vec2(
+        sin(u_time * 47.0) * u_kick * 0.004,
+        cos(u_time * 63.0) * u_kick * 0.003
+    );
+
+    // --- Horizontal glitch lines ---
+    if (u_glitch > 0.01) {
+        float row = floor(vertTexCoord.y * u_resolution.y * 0.5);
+        float rowSeed = hash(vec2(row, floor(u_time * 4.0)));
+
+        // Sparse displaced rows — more rows affected as glitch increases
+        if (rowSeed > (1.0 - u_glitch * 0.12)) {
+            float shift = (hash(vec2(row * 3.7, u_time * 11.0)) - 0.5) * u_glitch * 0.06;
+            // Kick and snare make glitch lines wider
+            shift *= 1.0 + u_kick * 2.0 + u_snare * 1.5;
+            uv.x += shift;
+        }
+
+        // Occasional thick block displacement
+        float blockSeed = hash(vec2(floor(vertTexCoord.y * 30.0), floor(u_time * 2.0)));
+        if (blockSeed > (1.0 - u_glitch * 0.03) && u_kick > 0.3) {
+            uv.x += (hash(vec2(blockSeed, u_time)) - 0.5) * u_glitch * 0.1;
+        }
+    }
+
+    // --- Displacement (cloud breathing) ---
     float upperFactor = smoothstep(0.7, 0.15, uv.y);
     float dn1 = fbm(uv * 3.0 + u_time * 0.06);
     float dn2 = fbm(uv * 3.0 + u_time * 0.06 + 100.0);
@@ -57,24 +89,33 @@ void main() {
 
     vec2 dispUV = clamp(uv + disp, 0.0, 1.0);
 
-    // --- Sample ---
-    vec4 col = texture2D(texture, dispUV);
+    // --- Sample with chromatic aberration ---
+    float aberr = u_glitch * 0.004 + u_snare * 0.003;
+    vec4 col;
+    if (aberr > 0.0005) {
+        // Split R/G/B channels horizontally
+        vec2 rUV = clamp(dispUV + vec2(aberr, 0.0), 0.0, 1.0);
+        vec2 bUV = clamp(dispUV - vec2(aberr, 0.0), 0.0, 1.0);
+        col.r = texture2D(texture, rUV).r;
+        col.g = texture2D(texture, dispUV).g;
+        col.b = texture2D(texture, bUV).b;
+        col.a = 1.0;
+    } else {
+        col = texture2D(texture, dispUV);
+    }
 
     // --- Dissolve ---
     float dissolveNoise = fbm(uv * 5.0 + u_time * 0.025);
 
     // Protect center — boy at roughly (0.5, 0.65)
-    // Dissolve from edges inward; boy is the last to go
     float centerDist = length((uv - vec2(0.5, 0.65)) * vec2(1.0, 0.7));
     float protect = smoothstep(0.0, 0.35, centerDist);
 
     float threshold = dissolveNoise * 0.5 + protect * 0.5;
 
-    // Soft dissolve edge
     float edgeW = 0.07;
     float visible = smoothstep(u_dissolve - edgeW * 0.5, u_dissolve + edgeW * 0.5, threshold);
 
-    // Edge glow band
     float atEdge = smoothstep(u_dissolve - edgeW, u_dissolve - edgeW * 0.25, threshold)
                  * (1.0 - smoothstep(u_dissolve + edgeW * 0.25, u_dissolve + edgeW, threshold));
 
@@ -83,41 +124,41 @@ void main() {
     // --- Color grading ---
     float gray = dot(col.rgb, vec3(0.299, 0.587, 0.114));
     vec3 bw = vec3(gray);
-    // Amber warmth — shadows stay cool, highlights go warm
     vec3 warm = vec3(
         gray * 1.3 + 0.02,
         gray * 0.92,
         gray * 0.55
     );
     vec3 graded = mix(bw, warm, u_warmth);
-
-    // Slight contrast boost
     graded = smoothstep(vec3(0.0), vec3(1.0), graded * 1.05);
 
     // --- Compose ---
-    // Behind the dissolve: warm golden version of the image (light shining through)
-    // Not black void — the blast illuminates what it burns away
     vec3 burnThrough = bw * vec3(1.5, 1.05, 0.5) + vec3(0.12, 0.06, 0.01);
     burnThrough = clamp(burnThrough, 0.0, 1.0);
     vec3 result = mix(burnThrough, graded, visible) + edgeColor;
 
     // --- Radial blast light ---
-    // Mushroom cloud center roughly at (0.5, 0.32)
     vec2 blastCenter = vec2(0.5, 0.32);
     float blastDist = length(uv - blastCenter);
     float lightFall = exp(-blastDist * 3.0);
     vec3 blastLight = vec3(1.0, 0.82, 0.45) * lightFall * u_lightIntensity;
     result += blastLight;
-
-    // Kick adds a brief flash from the blast
     result += vec3(1.0, 0.9, 0.6) * u_kick * u_lightIntensity * 0.3 * lightFall;
+
+    // --- Glitch color flash on snare ---
+    if (u_snare > 0.5 && u_glitch > 0.1) {
+        float flashRow = hash(vec2(floor(vertTexCoord.y * 80.0), floor(u_time * 5.0)));
+        if (flashRow > 0.92) {
+            result = mix(result, vec3(1.0, 0.85, 0.5), u_snare * u_glitch * 0.4);
+        }
+    }
 
     // --- Film grain ---
     float grain = (hash(uv * 800.0 + u_time * 37.0) - 0.5) * 0.025;
     result += grain;
 
     // --- Vignette ---
-    float vig = 1.0 - dot(uv - 0.5, uv - 0.5) * 1.8;
+    float vig = 1.0 - dot(vertTexCoord.st - 0.5, vertTexCoord.st - 0.5) * 1.8;
     result *= clamp(vig, 0.0, 1.0);
 
     gl_FragColor = vec4(clamp(result, 0.0, 1.0), 1.0);

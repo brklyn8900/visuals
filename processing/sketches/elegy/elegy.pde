@@ -268,6 +268,35 @@ float getLightIntensity(float time) {
   else                          return map(time, PIANO_START, PIANO_START + 20, 0.25, 0.08);
 }
 
+float getZoom(float time) {
+  // Very slow push-in toward the boy over the entire song
+  // 1.0 = no zoom, ends around 1.18 = 18% closer
+  float songEnd = PIANO_START + 20;
+  float t = constrain(time / songEnd, 0, 1);
+  // Ease-in: starts imperceptibly slow, accelerates slightly
+  t = t * t * (3 - 2 * t); // smoothstep
+  return 1.0 + t * 0.18;
+}
+
+float getGlitch(float time, float energy, float kick, float snare) {
+  float g;
+  if      (time < INTRO_END)     g = 0;
+  else if (time < V1_END)        g = 0.03; // barely perceptible
+  else if (time < V2_END)        g = map(time, V2_START, V2_END, 0.03, 0.1);
+  else if (time < V3_END)        g = map(time, V3_START, V3_END, 0.1, 0.25);
+  else if (time < PRE_END)       g = map(time, PRE_START, PRE_END, 0.25, 0.4);
+  else if (time < CHORUS_SWELL)  g = map(time, CHORUS_START, CHORUS_SWELL, 0.4, 0.6);
+  else if (time < WHISPER_START) g = map(time, CHORUS_SWELL, WHISPER_START, 0.6, 0.85);
+  else if (time < VIOLIN_START)  g = map(time, WHISPER_START, VIOLIN_START, 0.85, 0.15); // drops with whisper
+  else if (time < VIOLIN_CRESC)  g = map(time, VIOLIN_START, VIOLIN_CRESC, 0.15, 0.7);
+  else if (time < VIOLIN_QUIET)  g = map(time, VIOLIN_CRESC, VIOLIN_QUIET, 0.7, 0.9);
+  else if (time < PIANO_START)   g = map(time, VIOLIN_QUIET, PIANO_START, 0.9, 0.4);
+  else                           g = map(time, PIANO_START, PIANO_START + 20, 0.4, 0.1);
+  // Audio spikes push glitch harder
+  g += kick * 0.15 + snare * 0.1 + energy * 0.05;
+  return constrain(g, 0, 1);
+}
+
 // ================================================================
 //  PARTICLES
 // ================================================================
@@ -426,18 +455,23 @@ void draw() {
     float displace   = getDisplacement(time, energy);
     float edgeGlow   = getEdgeGlow(time);
     float lightInt   = getLightIntensity(time);
+    float zoom       = getZoom(time);
+    float glitch     = getGlitch(time, energy, kick, snare);
 
     // --- Render: image + shader ---
     canvas.beginDraw();
     canvas.background(0);
     canvas.image(sourceFrame, 0, 0);
 
+    shader.set("u_resolution", (float)targetWidth, (float)targetHeight);
     shader.set("u_time", time);
     shader.set("u_dissolve", dissolve);
     shader.set("u_warmth", warmth);
     shader.set("u_displace", displace);
     shader.set("u_edgeGlow", edgeGlow);
     shader.set("u_lightIntensity", lightInt);
+    shader.set("u_zoom", zoom);
+    shader.set("u_glitch", glitch);
     shader.set("u_bass", bass);
     shader.set("u_mid", mid);
     shader.set("u_highMid", highMid);
