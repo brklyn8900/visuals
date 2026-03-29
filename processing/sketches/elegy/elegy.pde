@@ -278,24 +278,6 @@ float getZoom(float time) {
   return 1.0 + t * 0.18;
 }
 
-float getGlitch(float time, float energy, float kick, float snare) {
-  // Very restrained — glitches are rare punctuation, not texture
-  float g;
-  if      (time < INTRO_END)     g = 0;
-  else if (time < V1_END)        g = 0;
-  else if (time < V2_END)        g = 0.02;
-  else if (time < V3_END)        g = map(time, V3_START, V3_END, 0.02, 0.08);
-  else if (time < PRE_END)       g = map(time, PRE_START, PRE_END, 0.08, 0.15);
-  else if (time < CHORUS_SWELL)  g = map(time, CHORUS_START, CHORUS_SWELL, 0.15, 0.25);
-  else if (time < WHISPER_START) g = map(time, CHORUS_SWELL, WHISPER_START, 0.25, 0.4);
-  else if (time < VIOLIN_START)  g = map(time, WHISPER_START, VIOLIN_START, 0.4, 0.05);
-  else if (time < VIOLIN_CRESC)  g = map(time, VIOLIN_START, VIOLIN_CRESC, 0.05, 0.3);
-  else if (time < VIOLIN_QUIET)  g = map(time, VIOLIN_CRESC, VIOLIN_QUIET, 0.3, 0.45);
-  else if (time < PIANO_START)   g = map(time, VIOLIN_QUIET, PIANO_START, 0.45, 0.15);
-  else                           g = map(time, PIANO_START, PIANO_START + 20, 0.15, 0.03);
-  return constrain(g, 0, 1);
-}
-
 // ================================================================
 //  PARTICLES
 // ================================================================
@@ -455,14 +437,12 @@ void draw() {
     float edgeGlow   = getEdgeGlow(time);
     float lightInt   = getLightIntensity(time);
     float zoom       = getZoom(time);
-    float glitch     = getGlitch(time, energy, kick, snare);
 
     // --- Render: image + shader ---
     canvas.beginDraw();
     canvas.background(0);
     canvas.image(sourceFrame, 0, 0);
 
-    shader.set("u_resolution", (float)targetWidth, (float)targetHeight);
     shader.set("u_time", time);
     shader.set("u_dissolve", dissolve);
     shader.set("u_warmth", warmth);
@@ -470,13 +450,7 @@ void draw() {
     shader.set("u_edgeGlow", edgeGlow);
     shader.set("u_lightIntensity", lightInt);
     shader.set("u_zoom", zoom);
-    shader.set("u_glitch", glitch);
     shader.set("u_bass", bass);
-    shader.set("u_mid", mid);
-    shader.set("u_highMid", highMid);
-    shader.set("u_presence", presence);
-    shader.set("u_kick", kick);
-    shader.set("u_snare", snare);
     shader.set("u_energy", energy);
 
     canvas.filter(shader);

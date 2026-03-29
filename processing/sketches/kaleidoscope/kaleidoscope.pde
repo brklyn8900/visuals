@@ -31,6 +31,9 @@ float crossfadeZone = 0.12;
 int[] source;
 PImage sourceFrame;
 
+// -- Fold state (smoothed) --
+float foldSmoothed = 0;
+
 void settings() {
   if (args != null && args.length >= 4) {
     targetWidth = Integer.parseInt(args[2]);
@@ -185,6 +188,18 @@ void draw() {
     shader.set("u_snare", snare);
     shader.set("u_hat", hat);
     shader.set("u_energy", energy);
+
+    // Fold: audio-driven blend between original and kaleidoscope
+    // Bass + energy push toward kaleidoscope, quiet = original image
+    float foldTarget = energy * 0.5 + bass * 0.3 + sub * 0.2;
+    foldTarget = constrain(foldTarget, 0, 0.85);
+    // Kick punches it toward full fold briefly
+    foldTarget += kick * 0.35;
+    foldTarget = constrain(foldTarget, 0, 1);
+    // Smooth so it unfolds gradually, not instantly
+    float smoothRate = (foldTarget > foldSmoothed) ? 0.12 : 0.06; // folds faster than it unfolds
+    foldSmoothed = foldSmoothed + (foldTarget - foldSmoothed) * smoothRate;
+    shader.set("u_fold", foldSmoothed);
 
     canvas.filter(shader);
     canvas.endDraw();
